@@ -1,0 +1,62 @@
+name: Build for FreeBSD
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  # 允许手动触发
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23' # 文档要求 Go 1.23+
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20' # 根据前端实际要求选择版本
+
+    - name: Install Frontend Dependencies & Build
+      run: |
+        cd web
+        npm install
+        npm run build
+        # 注意：如果 Go 代码使用了 embed (嵌入) 前端资源，这一步必须在 go build 之前完成
+        # 如果是传统模式部署，编译产物通常在 web/dist 目录，需要后续打包
+
+    - name: Build Go Binary (FreeBSD AMD64)
+      env:
+        GOOS: freebsd
+        GOARCH: amd64
+        CGO_ENABLED: 0 
+        # 注意：CGO_ENABLED=0 意味着静态编译。
+        # 如果你使用的是 SQLite (CGO)，通常需要交叉编译器。
+        # 如果项目使用了 modernc.org/sqlite (纯Go SQLite)，则 CGO_ENABLED=0 没问题。
+        # 如果编译失败请尝试去掉 CGO_ENABLED: 0 或配置交叉编译工具链。
+      run: |
+        go mod tidy
+        # 将输出文件命名为 gpt-load-freebsd
+        go build -ldflags="-s -w" -o gpt-load-freebsd main.go
+
+    - name: Prepare Release Files
+      run: |
+        mkdir -p release
+        cp gpt-load-freebsd release/
+        cp .env.example release/.env
+        # 如果前端没有被 embed 进二进制，需要把构建好的前端文件也打包进去
+        # cp -r web/dist release/web
+        
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: gpt-load-freebsd-amd64
+        path: release/
